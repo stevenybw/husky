@@ -18,29 +18,28 @@
 #include "boost/tokenizer.hpp"
 #include "core/engine.hpp"
 #include "io/input/inputformat_store.hpp"
-#include "lib/aggregator_factory.hpp"
 
 class Vertex {
    public:
     using KeyT = int;
 
-    Vertex() = default;
-    explicit Vertex(const KeyT& id) : vertex_id(id), cid(id) {}
-    const KeyT& id() const { return vertex_id; }
+    Vertex() : pr(0.15) {}
+    explicit Vertex(const KeyT& id) : vertexId(id), pr(0.15) {}
+    const KeyT& id() const { return vertexId; }
 
     // Serialization and deserialization
-    friend husky::BinStream& operator<<(husky::BinStream& stream, const Vertex& v) {
-        stream << v.vertex_id << v.adj << v.cid;
+    friend husky::BinStream& operator<<(husky::BinStream& stream, const Vertex& u) {
+        stream << u.vertexId << u.adj << u.pr;
         return stream;
     }
-    friend husky::BinStream& operator>>(husky::BinStream& stream, Vertex& v) {
-        stream >> v.vertex_id >> v.adj >> v.cid;
+    friend husky::BinStream& operator>>(husky::BinStream& stream, Vertex& u) {
+        stream >> u.vertexId >> u.adj >> u.pr;
         return stream;
     }
 
-    int vertex_id;
+    int vertexId;
     std::vector<int> adj;
-    int cid = -1;
+    float pr;
 };
 
 class Edge {
@@ -55,12 +54,12 @@ class Edge {
     int src, dst;
 };
 
-void cc() {
+void pagerank() {
     auto& infmt = husky::io::InputFormatStore::create_line_inputformat();
     infmt.set_input(husky::Context::get_param("input"));
 
     if (husky::Context::get_global_tid() == 0)
-        husky::LOG_I << "start WCC";
+        husky::LOG_I << "start PR";
 
     // Create and globalize vertex objects
     auto& edge_list = husky::ObjListStore::create_objlist<Edge>();
@@ -81,62 +80,40 @@ void cc() {
     auto& vertex_list = husky::ObjListStore::create_objlist<Vertex>();
     auto& reduce_neighbors_ch = husky::ChannelStore::create_push_channel<int>(edge_list, vertex_list);
     husky::list_execute(edge_list, {}, {&reduce_neighbors_ch}, [&reduce_neighbors_ch](Edge& e) {
-        reduce_neighbors_ch.push(e.src, e.dst);
+        reduce_neighbors_ch.push(-1, e.dst);
         reduce_neighbors_ch.push(e.dst, e.src);
     });
     husky::list_execute(vertex_list, {&reduce_neighbors_ch}, {}, [&reduce_neighbors_ch](Vertex& v) {
         const auto& msgs = reduce_neighbors_ch.get(v);
         v.adj.reserve(v.adj.size() + msgs.size());
-        for (auto dst : msgs)
-            v.adj.push_back(dst);
+        for (int dst : msgs)
+            if (dst > 0)
+                v.adj.push_back(dst);
     });
     husky::globalize(vertex_list);
 
     if (husky::Context::get_global_tid() == 0)
         husky::LOG_I << "construct vertices finished";
 
-    auto& ch =
-        husky::ChannelStore::create_push_combined_channel<int, husky::MinCombiner<int>>(vertex_list, vertex_list);
-    // Aggregator to check how many vertexes updating
-    husky::lib::Aggregator<int> not_finished(0, [](int& a, const int& b) { a += b; });
-    not_finished.to_reset_each_iter();
-    not_finished.update(1);
+    // Iterative PageRank computation
+    auto& prch =
+        husky::ChannelStore::create_push_combined_channel<float, husky::SumCombiner<float>>(vertex_list, vertex_list);
+    int numIters = stoi(husky::Context::get_param("iters"));
+    for (int iter = 0; iter < numIters; ++iter) {
+        husky::list_execute(vertex_list, [&prch, iter](Vertex& u) {
+            if (iter > 0)
+                u.pr = 0.85 * prch.get(u) + 0.15;
 
-    auto& agg_ch = husky::lib::AggregatorFactory::get_channel();
-
-    // Initialization
-    husky::list_execute(vertex_list, {}, {&ch, &agg_ch}, [&ch, &not_finished](Vertex& v) {
-        // Get the smallest component id among neighbors
-        for (auto nb : v.adj) {
-            if (nb < v.cid)
-                v.cid = nb;
-        }
-        // Broadcast my component id
-        for (auto nb : v.adj) {
-            if (nb > v.cid)
-                ch.push(v.cid, nb);
-        }
-    });
-    // Main Loop
-    while (not_finished.get_value()) {
-        if (husky::Context::get_global_tid() == 0)
-            husky::LOG_I << "# updated in this round: " << not_finished.get_value();
-        husky::list_execute(vertex_list, {&ch}, {&ch, &agg_ch}, [&ch, &not_finished](Vertex& v) {
-            if (ch.has_msgs(v)) {
-                auto msg = ch.get(v);
-                if (msg < v.cid) {
-                    v.cid = msg;
-                    not_finished.update(1);
-                    for (auto nb : v.adj)
-                        ch.push(v.cid, nb);
-                }
+            if (u.adj.size() == 0)
+                return;
+            float sendPR = u.pr / u.adj.size();
+            for (auto& nb : u.adj) {
+                prch.push(sendPR, nb);
             }
         });
-    }
-    std::string small_graph = husky::Context::get_param("print");
-    if (small_graph == "1") {
-        husky::list_execute(vertex_list,
-                            [](Vertex& v) { husky::LOG_I << "vertex: " << v.id() << " component id: " << v.cid; });
+
+        if (husky::Context::get_global_tid() == 0)
+            husky::LOG_I << "iteration " << iter << " done";
     }
 }
 
@@ -145,9 +122,9 @@ int main(int argc, char** argv) {
     args.push_back("hdfs_namenode");
     args.push_back("hdfs_namenode_port");
     args.push_back("input");
-    args.push_back("print");
+    args.push_back("iters");
     if (husky::init_with_args(argc, argv, args)) {
-        husky::run_job(cc);
+        husky::run_job(pagerank);
         return 0;
     }
     return 1;
