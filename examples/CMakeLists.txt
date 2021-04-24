@@ -77,6 +77,12 @@ target_link_libraries(CC ${husky})
 target_link_libraries(CC ${HUSKY_EXTERNAL_LIB})
 husky_default_properties(CC)
 
+# WCC with modified input format
+add_executable(test_wcc test_wcc.cpp)
+target_link_libraries(test_wcc ${husky})
+target_link_libraries(test_wcc ${HUSKY_EXTERNAL_LIB})
+husky_default_properties(test_wcc)
+
 # PIC
 add_executable(PIC pic.cpp)
 target_link_libraries(PIC ${husky})
