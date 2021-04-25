@@ -149,3 +149,8 @@ add_executable(test_pr test_pr.cpp)
 target_link_libraries(test_pr ${husky})
 target_link_libraries(test_pr ${HUSKY_EXTERNAL_LIB})
 husky_default_properties(test_pr)
+
+add_executable(test_lr test_lr.cpp)
+target_link_libraries(test_lr ${husky})
+target_link_libraries(test_lr ${HUSKY_EXTERNAL_LIB})
+husky_default_properties(test_lr)
