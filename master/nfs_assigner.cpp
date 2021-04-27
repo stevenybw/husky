@@ -103,6 +103,9 @@ std::pair<std::string, size_t> NFSBlockAssigner::answer(std::string& host, std::
         file_offset[url] += local_block_size;
     } else {
         finish_dict[url] += 1;
+        if (finish_dict[url] == num_workers_alive) {
+            finish_dict.erase(url);
+        }
     }
     return ret;
 }
