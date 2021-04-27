@@ -54,11 +54,6 @@ void logistic_regression() {
     int num_features = std::stoi(husky::Context::get_param("num_features"));
     load_data(husky::Context::get_param("train"), train_set, " ,", num_features);
 
-    // processing labels
-    husky::list_execute(train_set, [](auto& this_obj) {
-        husky::LOG_I << this_obj.y << ": " << this_obj.x[0] << std::endl;
-    });
-
     double alpha = std::stod(husky::Context::get_param("alpha"));
     int num_iter = std::stoi(husky::Context::get_param("n_iter"));
 
