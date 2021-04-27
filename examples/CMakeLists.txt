@@ -159,3 +159,8 @@ add_executable(test_wc test_wc.cpp)
 target_link_libraries(test_wc ${husky})
 target_link_libraries(test_wc ${HUSKY_EXTERNAL_LIB})
 husky_default_properties(test_wc)
+
+add_executable(test_km test_km.cpp)
+target_link_libraries(test_km ${husky})
+target_link_libraries(test_km ${HUSKY_EXTERNAL_LIB})
+husky_default_properties(test_km)
