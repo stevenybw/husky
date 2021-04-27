@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#include <filesystem>
 #include <map>
 #include <string>
 #include <utility>
@@ -36,6 +37,7 @@ class NFSBlockAssigner {
     int num_workers_alive;
     std::map<std::string, size_t> file_offset;
     std::map<std::string, size_t> file_size;
+    std::map<std::string, std::pair<std::filesystem::recursive_directory_iterator, size_t>> dir_iter;
     std::map<std::string, int> finish_dict;
 };
 }  // namespace husky

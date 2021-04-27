@@ -35,7 +35,7 @@ endfunction()
 # Usage:
 #   husky_default_properties(<target>)
 function(husky_default_properties target)
-    set_property(TARGET ${target} PROPERTY CXX_STANDARD 14)
+    set_property(TARGET ${target} PROPERTY CXX_STANDARD 17)
     if (DEFINED external_project_dependencies)
         add_dependencies(${target} ${external_project_dependencies})
     endif()

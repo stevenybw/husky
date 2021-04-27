@@ -14,6 +14,7 @@
 
 #include "master/nfs_assigner.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <utility>
@@ -55,6 +56,19 @@ void NFSBlockAssigner::master_setup_handler() { num_workers_alive = Context::get
 void NFSBlockAssigner::browse_local(const std::string& url) {
     // If url is a directory, recursively traverse all files in url
     // Then for all the files, calculate the blocks
+    if (std::filesystem::is_directory(url)) {
+        // LOG_I << "encounter directory " << url;
+        size_t total_size = 0;
+        for (auto f : std::filesystem::recursive_directory_iterator(url))
+            if (f.is_regular_file())
+                total_size += f.file_size();
+        dir_iter[url] = {std::filesystem::recursive_directory_iterator(url), 0};
+        file_size[url] = total_size;
+        file_offset[url] = 0;
+        finish_dict[url] = 0;
+        // LOG_I << "finished querying directory " << url;
+        return;
+    }
 
     // TODO(all): here I assume that url is a file
     std::ifstream in(url, std::ios::ate | std::ios::binary);
@@ -71,8 +85,21 @@ std::pair<std::string, size_t> NFSBlockAssigner::answer(std::string& host, std::
 
     std::pair<std::string, size_t> ret = {"", 0};  // selected_file, offset
     if (file_offset[url] < file_size[url]) {
-        ret.first = url;
-        ret.second = file_offset[url];
+        auto found_dir_iter = dir_iter.find(url);
+        if (found_dir_iter == dir_iter.end()) {
+            ret.first = url;
+            ret.second = file_offset[url];
+        } else {
+            auto& [iter, curr_file_offset] = found_dir_iter->second;
+            // LOG_I << "finding answer for " << url << ", current iter at " << iter->path() << ", offset " << curr_file_offset;
+            while (!iter->is_regular_file() || curr_file_offset >= iter->file_size()) {
+                iter++;
+                curr_file_offset = 0;
+            }
+            ret.first = iter->path().string();
+            ret.second = curr_file_offset;
+            curr_file_offset += local_block_size;
+        }
         file_offset[url] += local_block_size;
     } else {
         finish_dict[url] += 1;
