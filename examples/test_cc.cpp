@@ -20,9 +20,30 @@
 #include "io/input/inputformat_store.hpp"
 #include "lib/aggregator_factory.hpp"
 
+template <typename T>
+void hash_combine(std::size_t& seed, T const& key) {
+    std::hash<T> hasher;
+    seed ^= hasher(key) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+namespace std {
+template <typename T1, typename T2>
+struct hash<std::pair<T1, T2>> {
+    std::size_t operator()(std::pair<T1, T2> const& p) const {
+        std::size_t seed(0);
+        ::hash_combine(seed, p.first);
+        ::hash_combine(seed, p.second);
+        return seed;
+    }
+};
+}  // namespace std
+
+using vtx_t = uint64_t;
+vtx_t parse_vertex(const std::string& str) { return std::stoul(str.c_str()); }
+
 class Vertex {
    public:
-    using KeyT = int;
+    using KeyT = vtx_t;
 
     Vertex() = default;
     explicit Vertex(const KeyT& id) : vertex_id(id), cid(id) {}
@@ -38,21 +59,21 @@ class Vertex {
         return stream;
     }
 
-    int vertex_id;
-    std::vector<int> adj;
-    int cid = -1;
+    vtx_t vertex_id;
+    std::vector<vtx_t> adj;
+    vtx_t cid = -1;
 };
 
 class Edge {
    public:
-    using KeyT = std::pair<int, int>;
+    using KeyT = std::pair<vtx_t, vtx_t>;
 
     Edge() = default;
-    Edge(int src, int dst) : src(src), dst(dst) {}
+    Edge(vtx_t src, vtx_t dst) : src(src), dst(dst) {}
     explicit Edge(const KeyT& id) : Edge(id.first, id.second) {}
     KeyT id() const { return {src, dst}; }
 
-    int src, dst;
+    vtx_t src, dst;
 };
 
 void cc() {
@@ -70,7 +91,7 @@ void cc() {
         boost::char_separator<char> sep(" \t");
         boost::tokenizer<boost::char_separator<char>> tok(chunk, sep);
         auto it = tok.begin();
-        int src = stoi(*it++), dst = stoi(*it++);
+        vtx_t src = parse_vertex(*it++), dst = parse_vertex(*it++);
         edge_list.add_object(Edge(src, dst));
     };
     husky::load(infmt, parse_edge_list);
@@ -79,7 +100,7 @@ void cc() {
         husky::LOG_I << "read edge list finished";
 
     auto& vertex_list = husky::ObjListStore::create_objlist<Vertex>();
-    auto& reduce_neighbors_ch = husky::ChannelStore::create_push_channel<int>(edge_list, vertex_list);
+    auto& reduce_neighbors_ch = husky::ChannelStore::create_push_channel<vtx_t>(edge_list, vertex_list);
     husky::list_execute(edge_list, {}, {&reduce_neighbors_ch}, [&reduce_neighbors_ch](Edge& e) {
         reduce_neighbors_ch.push(e.src, e.dst);
         reduce_neighbors_ch.push(e.dst, e.src);
@@ -96,9 +117,9 @@ void cc() {
         husky::LOG_I << "construct vertices finished";
 
     auto& ch =
-        husky::ChannelStore::create_push_combined_channel<int, husky::MinCombiner<int>>(vertex_list, vertex_list);
+        husky::ChannelStore::create_push_combined_channel<vtx_t, husky::MinCombiner<vtx_t>>(vertex_list, vertex_list);
     // Aggregator to check how many vertexes updating
-    husky::lib::Aggregator<int> not_finished(0, [](int& a, const int& b) { a += b; });
+    husky::lib::Aggregator<vtx_t> not_finished(0, [](vtx_t& a, const vtx_t& b) { a += b; });
     not_finished.to_reset_each_iter();
 
     auto& agg_ch = husky::lib::AggregatorFactory::get_channel();
