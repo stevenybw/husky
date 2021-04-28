@@ -164,3 +164,8 @@ add_executable(test_km test_km.cpp)
 target_link_libraries(test_km ${husky})
 target_link_libraries(test_km ${HUSKY_EXTERNAL_LIB})
 husky_default_properties(test_km)
+
+add_executable(test_sort test_sort.cpp)
+target_link_libraries(test_sort ${husky})
+target_link_libraries(test_sort ${HUSKY_EXTERNAL_LIB})
+husky_default_properties(test_sort)
