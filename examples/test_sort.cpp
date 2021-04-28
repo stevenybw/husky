@@ -31,8 +31,8 @@ class Record {
     using KeyT = std::string;
 
     Record() = default;
-    explicit Record(const KeyT& w) : word(w) {}
-    explicit Record(KeyT&& w) : word(std::move(w)) {}
+    Record(const KeyT& w) : word(w) {}
+    Record(KeyT&& w) : word(std::move(w)) {}
     const KeyT& id() const { return word; }
 
     KeyT word;
@@ -42,7 +42,7 @@ class Record {
     }
 
     struct get_char_length {
-        const char& operator()(const Record& r, size_t i) const { return r.word[i]; }
+        unsigned char operator()(const Record& r, size_t i) const { return r.word[i]; }
         size_t operator()(const Record& r) const { return 10; }
     };
 
@@ -57,15 +57,11 @@ class Record {
 };
 
 void wc() {
-    auto& infmt = husky::io::InputFormatStore::create_line_inputformat();
+    auto& infmt = husky::io::InputFormatStore::create_chunk_inputformat(100);
     infmt.set_input(husky::Context::get_param("input"));
     auto& records_list = husky::ObjListStore::create_objlist<Record>();
 
-    auto parse_tera = [&](boost::string_ref& chunk) {
-        if (chunk.size() == 0)
-            return;
-        records_list.add_object(Record(chunk.to_string()));
-    };
+    auto parse_tera = [&](boost::string_ref& chunk) { records_list.add_object(chunk.to_string()); };
 
     husky::load(infmt, parse_tera);
     husky::globalize(records_list);
