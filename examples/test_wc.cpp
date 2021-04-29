@@ -18,7 +18,6 @@
 #include <vector>
 
 #include "boost/tokenizer.hpp"
-
 #include "core/engine.hpp"
 #include "io/input/inputformat_store.hpp"
 #include "lib/aggregator_factory.hpp"
@@ -42,20 +41,21 @@ bool operator<(const std::pair<int, std::string>& a, const std::pair<int, std::s
 void wc() {
     auto& infmt = husky::io::InputFormatStore::create_line_inputformat();
     infmt.set_input(husky::Context::get_param("input"));
-    auto& word_list = husky::ObjListStore::create_objlist<Word>();
-    auto& ch = husky::ChannelStore::create_push_combined_channel<int, husky::SumCombiner<int>>(infmt, word_list);
+    auto& raw_word_list = husky::ObjListStore::create_objlist<Word>();
 
     auto parse_wc = [&](boost::string_ref& chunk) {
         if (chunk.size() == 0)
             return;
-        boost::char_separator<char> sep(" ");
+        boost::char_separator<char> sep(" \r\t");
         boost::tokenizer<boost::char_separator<char>> tok(chunk, sep);
         for (auto& w : tok) {
-            ch.push(1, w);
+            raw_word_list.add_object(Word(w));
         }
     };
 
     husky::load(infmt, parse_wc);
+
+    husky::lib::AggregatorFactory::sync();
 
     // Show topk words.
     const int kMaxNum = 100;
@@ -83,14 +83,34 @@ void wc() {
             for (auto& p : pairs)
                 out << p;
         });
+    unique_topk.to_reset_each_iter();
 
-    husky::list_execute(word_list, [&ch, &unique_topk, add_to_topk](Word& word) {
-        unique_topk.update(add_to_topk, std::make_pair(ch.get(word), word.id()));
-    });
+    if (husky::Context::get_global_tid() == 0)
+        husky::LOG_I << "Start WordCount";
+    auto begin = std::chrono::high_resolution_clock::now();
 
-    husky::lib::AggregatorFactory::sync();
+    constexpr int repeat = 10;
+    for (int i = 0; i < repeat; ++i) {
+        auto& word_list = husky::ObjListStore::create_objlist<Word>("word_list");
+        auto& ch =
+            husky::ChannelStore::create_push_combined_channel<int, husky::SumCombiner<int>>(raw_word_list, word_list, "wc_ch");
+        husky::lib::AggregatorFactory::sync();
+        husky::list_execute(raw_word_list, [&](Word& s) { ch.push(1, s.word); });
+        husky::list_execute(word_list, [&ch, &unique_topk, add_to_topk](Word& word) {
+            unique_topk.update(add_to_topk, std::make_pair(ch.get(word), word.id()));
+        });
+        husky::lib::AggregatorFactory::sync();
+        if (husky::Context::get_global_tid() == 0)
+            husky::LOG_I << "Run " << i << " done";
+        husky::ObjListStore::drop_objlist("word_list");
+        husky::ChannelStore::drop_channel("wc_ch");
+    }
+
+    auto end = std::chrono::high_resolution_clock::now();
 
     if (husky::Context::get_global_tid() == 0) {
+        husky::LOG_I << "Elapsed time (WC - " << husky::Context::get_num_global_workers()
+                     << " workers): " << std::chrono::duration<double>(end - begin).count() / repeat << " sec(s)";
         for (auto& i : unique_topk.get_value())
             husky::LOG_I << i.second << " " << i.first;
     }
