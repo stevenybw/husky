@@ -102,8 +102,8 @@ void wc() {
         husky::lib::AggregatorFactory::sync();
         if (husky::Context::get_global_tid() == 0)
             husky::LOG_I << "Run " << i << " done";
-        husky::ObjListStore::drop_objlist("word_list");
         husky::ChannelStore::drop_channel("wc_ch");
+        husky::ObjListStore::drop_objlist("word_list");
     }
 
     auto end = std::chrono::high_resolution_clock::now();
