@@ -227,6 +227,7 @@ MailboxEventLoop::MailboxEventLoop(zmq::context_t* zmq_context)
     register_event_handler(MAILBOX_EVENT_RECV_COMM_END, std::bind(&MailboxEventLoop::recv_comm_complete_handler, this));
 
     event_loop_thread_ = new std::thread([&]() { serve(); });
+    event_process_thread_ = new std::thread([&]() { process(); });
 }
 
 MailboxEventLoop::~MailboxEventLoop() {
@@ -247,6 +248,14 @@ void MailboxEventLoop::serve() {
             break;
         ASSERT_MSG(event_handler_.find(event_type) != event_handler_.end(), "Unknown event type.");
         event_handler_[event_type]();
+    }
+}
+
+void MailboxEventLoop::process() {
+    std::function<void()> fn;
+    while (true) {
+        event_queue.pop(fn);
+        fn();
     }
 }
 
@@ -274,7 +283,7 @@ void MailboxEventLoop::recv_comm_handler() {
     int channel_id = zmq_recv_int32(&event_recver_);
     int progress = zmq_recv_int32(&event_recver_);
     BinStream* recv_bin_stream_ptr = reinterpret_cast<BinStream*>(zmq_recv_int64(&event_recver_));
-    _recv_comm_handler(thread_id, channel_id, progress, recv_bin_stream_ptr);
+    event_queue.push([=] { _recv_comm_handler(thread_id, channel_id, progress, recv_bin_stream_ptr); });
 }
 
 void MailboxEventLoop::_recv_comm_handler(int thread_id, int channel_id, int progress, BinStream* recv_bin_stream_ptr) {
@@ -296,7 +305,7 @@ void MailboxEventLoop::send_comm_handler() {
     int channel_id = zmq_recv_int32(&event_recver_);
     int progress = zmq_recv_int32(&event_recver_);
     BinStream* bin_stream_ptr = reinterpret_cast<BinStream*>(zmq_recv_int64(&event_recver_));
-    _send_comm_handler(thread_id, channel_id, progress, bin_stream_ptr);
+    event_queue.push([=] { _send_comm_handler(thread_id, channel_id, progress, bin_stream_ptr); });
 }
 
 void MailboxEventLoop::_send_comm_handler(int thread_id, int channel_id, int progress, BinStream* send_bin_stream_ptr) {
@@ -319,8 +328,10 @@ void MailboxEventLoop::send_comm_complete_handler() {
     int num_local_threads = zmq_recv_int32(&event_recver_);
     auto* global_pids_ptr = reinterpret_cast<std::vector<int>*>(zmq_recv_int64(&event_recver_));
     assert(global_pids_ptr->size() != 0);
-    _send_comm_complete_handler(channel_id, progress, num_local_threads, *global_pids_ptr);
-    delete global_pids_ptr;
+    event_queue.push([=] {
+        _send_comm_complete_handler(channel_id, progress, num_local_threads, *global_pids_ptr);
+        delete global_pids_ptr;
+    });
 }
 
 void MailboxEventLoop::_send_comm_complete_handler(int channel_id, int progress, int num_local_threads,
@@ -355,7 +366,10 @@ void MailboxEventLoop::recv_comm_complete_handler() {
     int channel_id = zmq_recv_int32(&event_recver_);
     int progress = zmq_recv_int32(&event_recver_);
     int num_global_sync_proceses = zmq_recv_int32(&event_recver_);
-    _recv_comm_complete_handler(channel_id, progress, num_global_sync_proceses);
+    //    husky::LOG_I << "recv_comm_complete_handler(" << channel_id << " " << progress << " " <<
+    //    num_global_sync_proceses
+    //                 << ")\n";
+    event_queue.push([=] { _recv_comm_complete_handler(channel_id, progress, num_global_sync_proceses); });
 }
 
 void MailboxEventLoop::_recv_comm_complete_handler(int channel_id, int progress) {

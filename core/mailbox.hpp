@@ -29,6 +29,8 @@
 #include "base/serialization.hpp"
 #include "core/hash_ring.hpp"
 
+#include <tbb/concurrent_queue.h>
+
 namespace husky {
 
 using base::BinStream;
@@ -217,6 +219,7 @@ class MailboxEventLoop {
     void _recv_comm_complete_handler(int channel_id, int progress, int num_global_sync_processes);
 
     void serve();
+    void process();
 
     zmq::context_t* zmq_context_;
     zmq::socket_t event_recver_;
@@ -227,6 +230,8 @@ class MailboxEventLoop {
     std::unordered_map<std::pair<int, int>, int> send_comm_complete_counter_;
     std::unordered_map<std::pair<int, int>, int> recv_comm_complete_counter_;
     std::thread* event_loop_thread_;
+    tbb::concurrent_bounded_queue<std::function<void()>> event_queue;
+    std::thread* event_process_thread_;
     int num_local_threads_ = 0;
     int num_global_processes_ = 1;
     int process_id_ = -1;
