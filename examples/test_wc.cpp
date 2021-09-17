@@ -39,6 +39,7 @@ bool operator<(const std::pair<int, std::string>& a, const std::pair<int, std::s
 }
 
 void wc() {
+    auto t1 = std::chrono::high_resolution_clock::now();
     auto& infmt = husky::io::InputFormatStore::create_line_inputformat();
     infmt.set_input(husky::Context::get_param("input"));
     auto& raw_word_list = husky::ObjListStore::create_objlist<Word>();
@@ -89,11 +90,11 @@ void wc() {
         husky::LOG_I << "Start WordCount";
     auto begin = std::chrono::high_resolution_clock::now();
 
-    constexpr int repeat = 10;
+    constexpr int repeat = 1;
     for (int i = 0; i < repeat; ++i) {
         auto& word_list = husky::ObjListStore::create_objlist<Word>("word_list");
-        auto& ch =
-            husky::ChannelStore::create_push_combined_channel<int, husky::SumCombiner<int>>(raw_word_list, word_list, "wc_ch");
+        auto& ch = husky::ChannelStore::create_push_combined_channel<int, husky::SumCombiner<int>>(raw_word_list,
+                                                                                                   word_list, "wc_ch");
         husky::lib::AggregatorFactory::sync();
         husky::list_execute(raw_word_list, [&](Word& s) { ch.push(1, s.word); });
         husky::list_execute(word_list, [&ch, &unique_topk, add_to_topk](Word& word) {
@@ -110,7 +111,8 @@ void wc() {
 
     if (husky::Context::get_global_tid() == 0) {
         husky::LOG_I << "Elapsed time (WC - " << husky::Context::get_num_global_workers()
-                     << " workers): " << std::chrono::duration<double>(end - begin).count() / repeat << " sec(s)";
+                     << " workers): " << std::chrono::duration<double>(end - begin).count() / repeat << " sec(s)"
+                     << " " << std::chrono::duration<double>(end - t1).count() << " sec(s) ";
         for (auto& i : unique_topk.get_value())
             husky::LOG_I << i.second << " " << i.first;
     }

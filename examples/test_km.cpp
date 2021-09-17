@@ -95,6 +95,7 @@ void load_data(std::string url, husky::ObjList<KMeansPoint>& data, const char* s
 }
 
 void kmeans() {
+    auto t1 = std::chrono::high_resolution_clock::now();
     auto& points = husky::ObjListStore::create_objlist<KMeansPoint>();
 
     // load data
@@ -172,6 +173,8 @@ void kmeans() {
     if (husky::Context::get_global_tid() == 0)
         husky::LOG_I << "Sampled " << K << " initial centers from " << total_count << " points.";
 
+    auto begin = std::chrono::high_resolution_clock::now();
+
     for (int iter = 0; iter < num_iter; iter++) {
         husky::list_execute(points,
                             [&aggr, apply_point_to_center](KMeansPoint& p) { aggr.update(apply_point_to_center, p); });
@@ -183,6 +186,13 @@ void kmeans() {
         if (husky::Context::get_global_tid() == 0)
             husky::LOG_I << "Iteration " << iter << " done.";
     }
+
+    auto end = std::chrono::high_resolution_clock::now();
+
+    if (husky::Context::get_global_tid() == 0)
+        husky::LOG_I << "Elapsed time per iteration (KM - " << husky::Context::get_num_global_workers()
+                     << " workers): " << std::chrono::duration<double>(end - begin).count() / num_iter << " sec(s)"
+                     << " " << std::chrono::duration<double>(end - t1).count() << " sec(s) ";
 
     {
         husky::lib::Aggregator wssseAggr(0.0);

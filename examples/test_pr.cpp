@@ -55,6 +55,7 @@ class Edge {
 };
 
 void pagerank() {
+    auto t1 = std::chrono::high_resolution_clock::now();
     auto& infmt = husky::io::InputFormatStore::create_line_inputformat();
     infmt.set_input(husky::Context::get_param("input"));
 
@@ -99,6 +100,9 @@ void pagerank() {
     auto& prch =
         husky::ChannelStore::create_push_combined_channel<float, husky::SumCombiner<float>>(vertex_list, vertex_list);
     int numIters = stoi(husky::Context::get_param("iters"));
+
+    auto begin = std::chrono::high_resolution_clock::now();
+
     for (int iter = 0; iter < numIters; ++iter) {
         husky::list_execute(vertex_list, [&prch, iter](Vertex& u) {
             if (iter > 0)
@@ -115,6 +119,13 @@ void pagerank() {
         if (husky::Context::get_global_tid() == 0)
             husky::LOG_I << "iteration " << iter << " done";
     }
+
+    auto end = std::chrono::high_resolution_clock::now();
+
+    if (husky::Context::get_global_tid() == 0)
+        husky::LOG_I << "Elapsed time per iteration (PR - " << husky::Context::get_num_global_workers()
+                     << " workers): " << std::chrono::duration<double>(end - begin).count() / numIters << " sec(s)"
+                     << " " << std::chrono::duration<double>(end - t1).count() << " sec(s) ";
 }
 
 int main(int argc, char** argv) {

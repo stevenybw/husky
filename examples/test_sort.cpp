@@ -57,6 +57,7 @@ class Record {
 };
 
 void wc() {
+    auto t1 = std::chrono::high_resolution_clock::now();
     auto& infmt = husky::io::InputFormatStore::create_chunk_inputformat(100);
     infmt.set_input(husky::Context::get_param("input"));
     auto& records_list = husky::ObjListStore::create_objlist<Record>();
@@ -64,7 +65,7 @@ void wc() {
     auto parse_tera = [&](boost::string_ref& chunk) { records_list.add_object(chunk.to_string()); };
 
     husky::load(infmt, parse_tera);
-    husky::globalize(records_list);
+    husky::balance(records_list);
 
     husky::lib::AggregatorFactory::sync();
 
@@ -103,23 +104,36 @@ void wc() {
 
     auto& sorted_list = husky::ObjListStore::create_objlist<Record>();
     auto& migrate_channel = husky::ChannelStore::create_migrate_channel(records_list, sorted_list);
-    husky::list_execute(records_list, {}, {&migrate_channel},
-                        [&samples, j = 0, p, &migrate_channel](Record& r) mutable {
-                            while (j < p - 1 && samples[j] < r)
-                                j++;
-                            migrate_channel.migrate(r, j);
-                        });
-    {
-        husky::ChannelManager in_manager({&migrate_channel});
-        in_manager.poll_and_distribute();
-    }
+    husky::list_execute(records_list, [&samples, j = 0, p, &migrate_channel](Record& r) mutable {
+        while (j < p - 1 && samples[j] < r)
+            j++;
+        migrate_channel.migrate(r, j);
+    });
+
+    if (husky::Context::get_global_tid() == 0)
+        husky::LOG_I << "Sorting: data migrated.";
+
+    husky::list_execute(sorted_list, [](Record& r) {});
+
+    if (husky::Context::get_global_tid() == 0)
+        husky::LOG_I << "Sorting: materialize sorted_list.";
 
     Record::sort(sorted_list.get_data().begin(), sorted_list.get_data().end());
+
+    if (husky::Context::get_global_tid() == 0)
+        husky::LOG_I << "Sorting: final result local sorted.";
 
     husky::lib::AggregatorFactory::sync();
 
     if (husky::Context::get_global_tid() == 0)
         husky::LOG_I << "Sorting done.";
+
+    auto end = std::chrono::high_resolution_clock::now();
+
+    if (husky::Context::get_global_tid() == 0) {
+        husky::LOG_I << "Elapsed time (TS - " << husky::Context::get_num_global_workers()
+                     << " workers): " << std::chrono::duration<double>(end - t1).count() << " sec(s)";
+    }
 
     husky::lib::Aggregator<std::map<int, std::vector<std::string>>> result_collect_aggr(
         std::map<int, std::vector<std::string>>(),

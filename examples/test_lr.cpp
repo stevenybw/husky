@@ -47,6 +47,7 @@ void load_data(std::string url, husky::ObjList<husky::lib::ml::LabeledPointHObj<
 
 template <bool is_sparse = false>
 void logistic_regression() {
+    auto t1 = std::chrono::high_resolution_clock::now();
     using LabeledPointHObj = husky::lib::ml::LabeledPointHObj<double, double, is_sparse>;
     auto& train_set = husky::ObjListStore::create_objlist<LabeledPointHObj>();
 
@@ -62,7 +63,16 @@ void logistic_regression() {
     lr.report_per_round = true;  // report training error per round
 
     // train the model
+    auto begin = std::chrono::high_resolution_clock::now();
+
     lr.template train<husky::lib::ml::FGD>(train_set, num_iter, alpha);
+
+    auto end = std::chrono::high_resolution_clock::now();
+
+    if (husky::Context::get_global_tid() == 0)
+        husky::LOG_I << "Elapsed time per iteration (LR - " << husky::Context::get_num_global_workers()
+                     << " workers): " << std::chrono::duration<double>(end - begin).count() / num_iter << " sec(s)"
+                     << " " << std::chrono::duration<double>(end - t1).count() << " sec(s) ";
 }
 
 void init() { logistic_regression(); }
