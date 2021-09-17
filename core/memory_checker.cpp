@@ -57,6 +57,7 @@ void MemoryChecker::loop() {
 void MemoryChecker::update() {
     MemoryInfo& info = get_memory_info();
 
+#ifdef BUILD_WITH_TCMALLOC
     size_t allocated_bytes;
     MallocExtension::instance()->GetNumericProperty(k_alloccated_bytes_str, &allocated_bytes);
     size_t heap_size;
@@ -64,6 +65,10 @@ void MemoryChecker::update() {
 
     info.allocated_bytes = allocated_bytes;
     info.heap_size = heap_size;
+#else
+    info.allocated_bytes = 0;
+    info.heap_size = 0;
+#endif
 }
 
 }  // namespace husky

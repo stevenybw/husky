@@ -42,11 +42,14 @@ include(cmake/modules/gtest.cmake)
 include(cmake/modules/zeromq.cmake)
 include(cmake/dep.cmake)
 
+# TBB
+find_package(TBB REQUIRED)
+
 # External Includes
-set(HUSKY_EXTERNAL_INCLUDE ${Boost_INCLUDE_DIRS} ${TCMALLOC_INCLUDE_DIR} ${ZMQ_INCLUDE_DIR} ${GLOG_INCLUDE_DIR} ${EIGEN_INCLUDE_DIR})
+set(HUSKY_EXTERNAL_INCLUDE ${Boost_INCLUDE_DIRS} ${ZMQ_INCLUDE_DIR} ${GLOG_INCLUDE_DIR} ${EIGEN_INCLUDE_DIR})
 
 # External Libraries
-set(HUSKY_EXTERNAL_LIB ${GLOG_LIBRARY} ${ZMQ_LIBRARY} ${TCMALLOC_LIBRARY} ${CMAKE_THREAD_LIBS_INIT} ${Boost_LIBRARIES})
+set(HUSKY_EXTERNAL_LIB ${GLOG_LIBRARY} ${ZMQ_LIBRARY} ${CMAKE_THREAD_LIBS_INIT} ${Boost_LIBRARIES} TBB::tbb)
 
 # External Definitions
 set(HUSKY_EXTERNAL_DEFINITION "")
@@ -57,6 +60,23 @@ if(LIBHDFS3_FOUND)
     list(APPEND HUSKY_EXTERNAL_LIB ${LIBHDFS3_LIBRARY})
     list(APPEND HUSKY_EXTERNAL_DEFINITION ${LIBHDFS3_DEFINITION})
 endif(LIBHDFS3_FOUND)
+
+option(WITH_TCMALLOC "build with TCMALLOC" ON)
+if (WITH_TCMALLOC)
+    list(APPEND HUSKY_EXTERNAL_INCLUDE ${TCMALLOC_INCLUDE_DIR})
+    list(APPEND HUSKY_EXTERNAL_LIB ${TCMALLOC_LIBRARY})
+    list(APPEND HUSKY_EXTERNAL_DEFINITION -DBUILD_WITH_TCMALLOC)
+endif ()
+
+option(WITH_ASAN "build with ASAN" OFF)
+if (WITH_ASAN)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address")
+    if (WITH_JEMALLOC)
+        message(FATAL "ASAN does not work well with JeMalloc")
+    endif ()
+endif ()
 
 # MongoDB
 if(MONGOCLIENT_FOUND)

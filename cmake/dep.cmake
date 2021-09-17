@@ -58,6 +58,23 @@ endif(TCMALLOC_FOUND)
 
 ### LibHDFS3 ###
 
+include(ExternalProject)
+ExternalProject_Add(libhdfs3
+        GIT_REPOSITORY https://github.com/erikmuttersbach/libhdfs3
+        GIT_TAG origin/apache-rpc-9
+        UPDATE_DISCONNECTED true
+        PREFIX ${CMAKE_BINARY_DIR}/extlib/libhdfs3
+        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>)
+
+ExternalProject_Get_Property(libhdfs3 INSTALL_DIR)
+
+add_library(hdfs3 UNKNOWN IMPORTED)
+set_target_properties(hdfs3 PROPERTIES
+        IMPORTED_LOCATION "${INSTALL_DIR}/lib/libhdfs3.so")
+add_dependencies(hdfs3 libhdfs3)
+set(LIBHDFS3_INCLUDE_DIR "${INSTALL_DIR}/include")
+set(LIBHDFS3_LIBRARY hdfs3)
+
 find_path(LIBHDFS3_INCLUDE_DIR NAMES hdfs/hdfs.h)
 find_library(LIBHDFS3_LIBRARY NAMES hdfs3)
 if(LIBHDFS3_INCLUDE_DIR AND LIBHDFS3_LIBRARY)
