@@ -39,15 +39,21 @@ HDFSFileSplitter::~HDFSFileSplitter() {
 void HDFSFileSplitter::init_blocksize(hdfsFS fs_, const std::string& url) {
     int num_files;
     auto file_info = hdfsListDirectory(fs_, url.c_str(), &num_files);
+    fprintf(stderr, "Read from HDFS path %s with %d files\n", url.c_str(), num_files);
     for (int i = 0; i < num_files; ++i) {
         if (file_info[i].mKind == kObjectKindFile) {
             hdfs_block_size = file_info[i].mBlockSize;
             hdfsFreeFileInfo(file_info, num_files);
+            fprintf(stderr, "HDFS path %s block size = %zu\n", url.c_str(), hdfs_block_size);
             return;
         }
         continue;
     }
-    throw base::HuskyException("Block size init error. (File NOT exist or EMPTY directory)");
+    std::string s = "Block size init error... (File NOT exist or EMPTY directory)";
+    s += url;
+    s += std::string(" ");
+    s += std::to_string(num_files);
+    throw base::HuskyException(s);
 }
 
 void HDFSFileSplitter::load(std::string url) {
@@ -60,7 +66,9 @@ void HDFSFileSplitter::load(std::string url) {
     fs_ = hdfsBuilderConnect(builder);
     hdfsFreeBuilder(builder);
     base::call_once_each_time(init_blocksize, fs_, url_);
-    data_ = new char[hdfs_block_size];
+    if (data_ == NULL) {
+        data_ = new char[hdfs_block_size];
+    }
 }
 
 boost::string_ref HDFSFileSplitter::fetch_block(bool is_next) {
@@ -106,9 +114,11 @@ int HDFSFileSplitter::read_block(const std::string& fn) {
     hdfsSeek(fs_, file_, offset_);
     size_t start = 0;
     size_t nbytes = 0;
+    fprintf(stderr, "HDFS read from %s ( offset %zu  size %lf MB ) \n", fn.c_str(), offset_,
+            1.0 * hdfs_block_size / 1024.0 / 1024.0);
     while (start < hdfs_block_size) {
         // only 128KB per hdfsRead
-        nbytes = hdfsRead(fs_, file_, data_ + start, hdfs_block_size);
+        nbytes = hdfsRead(fs_, file_, data_ + start, hdfs_block_size - start);
         start += nbytes;
         if (nbytes == 0)
             break;

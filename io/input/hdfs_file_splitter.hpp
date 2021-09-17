@@ -40,7 +40,7 @@ class HDFSFileSplitter : public FileSplitterBase {
     int read_block(const std::string& fn);
 
     // using heap
-    char* data_;
+    char* data_ = NULL;
     // url may be a directory, so that cur_file is different from url
     hdfsFile file_ = NULL;
     hdfsFS fs_;
