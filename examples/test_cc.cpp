@@ -20,20 +20,11 @@
 #include "io/input/inputformat_store.hpp"
 #include "lib/aggregator_factory.hpp"
 
-template <typename T>
-void hash_combine(std::size_t& seed, T const& key) {
-    std::hash<T> hasher;
-    seed ^= hasher(key) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-}
-
 namespace std {
 template <typename T1, typename T2>
 struct hash<std::pair<T1, T2>> {
     std::size_t operator()(std::pair<T1, T2> const& p) const {
-        std::size_t seed(0);
-        ::hash_combine(seed, p.first);
-        ::hash_combine(seed, p.second);
-        return seed;
+        return std::hash<T1>()(p.first) ^ std::hash<T2>()(p.second);
     }
 };
 }  // namespace std
@@ -76,7 +67,20 @@ class Edge {
     vtx_t src, dst;
 };
 
+class Word {
+   public:
+    using KeyT = std::string;
+
+    Word() = default;
+    Word(const KeyT& w) : word(w) {}
+    Word(KeyT&& w) : word(std::move(w)) {}
+    const KeyT& id() const { return word; }
+
+    KeyT word;
+};
+
 void cc() {
+    auto t1 = std::chrono::high_resolution_clock::now();
     auto& infmt = husky::io::InputFormatStore::create_line_inputformat();
     infmt.set_input(husky::Context::get_param("input"));
 
@@ -84,15 +88,9 @@ void cc() {
         husky::LOG_I << "start CC";
 
     // Create and globalize vertex objects
-    auto& edge_list = husky::ObjListStore::create_objlist<Edge>();
+    auto& edge_list = husky::ObjListStore::create_objlist<Word>();
     auto parse_edge_list = [&edge_list](boost::string_ref& chunk) {
-        if (chunk.size() == 0)
-            return;
-        boost::char_separator<char> sep(" \t");
-        boost::tokenizer<boost::char_separator<char>> tok(chunk, sep);
-        auto it = tok.begin();
-        vtx_t src = parse_vertex(*it++), dst = parse_vertex(*it++);
-        edge_list.add_object(Edge(src, dst));
+        edge_list.add_object(std::move(chunk.to_string()));
     };
     husky::load(infmt, parse_edge_list);
 
@@ -101,9 +99,16 @@ void cc() {
 
     auto& vertex_list = husky::ObjListStore::create_objlist<Vertex>();
     auto& reduce_neighbors_ch = husky::ChannelStore::create_push_channel<vtx_t>(edge_list, vertex_list);
-    husky::list_execute(edge_list, {}, {&reduce_neighbors_ch}, [&reduce_neighbors_ch](Edge& e) {
-        reduce_neighbors_ch.push(e.src, e.dst);
-        reduce_neighbors_ch.push(e.dst, e.src);
+    husky::list_execute(edge_list, {}, {&reduce_neighbors_ch}, [&reduce_neighbors_ch](Word& w) {
+        auto& chunk = w.word;
+        if (chunk.size() == 0)
+            return;
+        boost::char_separator<char> sep(" \t");
+        boost::tokenizer<boost::char_separator<char>> tok(chunk, sep);
+        auto it = tok.begin();
+        vtx_t src = parse_vertex(*it++), dst = parse_vertex(*it++);
+        reduce_neighbors_ch.push(src, dst);
+        reduce_neighbors_ch.push(dst, src);
     });
     husky::list_execute(vertex_list, {&reduce_neighbors_ch}, {}, [&reduce_neighbors_ch](Vertex& v) {
         const auto& msgs = reduce_neighbors_ch.get(v);
@@ -124,28 +129,55 @@ void cc() {
 
     auto& agg_ch = husky::lib::AggregatorFactory::get_channel();
 
-    // Initialization
-    husky::list_execute(vertex_list, {}, {&ch}, [&ch](Vertex& v) {
-        v.cid = v.vertex_id;
-        for (auto nb : v.adj)
-            ch.push(v.cid, nb);
-    });
-    // Main Loop
-    do {
-        husky::list_execute(vertex_list, {&ch}, {&ch, &agg_ch}, [&ch, &not_finished](Vertex& v) {
-            if (ch.has_msgs(v)) {
-                auto msg = ch.get(v);
-                if (msg < v.cid) {
-                    v.cid = msg;
-                    not_finished.update(1);
-                    for (auto nb : v.adj)
-                        ch.push(v.cid, nb);
-                }
+    if (husky::Context::get_global_tid() == 0)
+        husky::LOG_I << "Start CC";
+    auto begin = std::chrono::high_resolution_clock::now();
+    constexpr int repeat = 1;
+    for (int i = 0; i < repeat; ++i) {
+        // Initialization
+        husky::list_execute(vertex_list, {}, {&ch, &agg_ch}, [&ch, &not_finished](Vertex& v) {
+            not_finished.update(1);
+            v.cid = v.vertex_id;
+            // Get the smallest component id among neighbors
+            for (auto nb : v.adj) {
+                if (nb < v.cid)
+                    v.cid = nb;
+            }
+            // Broadcast my component id
+            for (auto nb : v.adj) {
+                if (nb > v.cid)
+                    ch.push(v.cid, nb);
             }
         });
         if (husky::Context::get_global_tid() == 0)
-            husky::LOG_I << "# updated in this round: " << not_finished.get_value();
-    } while (not_finished.get_value());
+            husky::LOG_I << "Run " << i << " starts";
+        // Main Loop
+        while (not_finished.get_value()) {
+            husky::list_execute(vertex_list, {&ch}, {&ch, &agg_ch}, [&ch, &not_finished](Vertex& v) {
+                if (ch.has_msgs(v)) {
+                    auto msg = ch.get(v);
+                    if (msg < v.cid) {
+                        v.cid = msg;
+                        not_finished.update(1);
+                        for (auto nb : v.adj)
+                            ch.push(v.cid, nb);
+                    }
+                }
+            });
+            if (husky::Context::get_global_tid() == 0)
+                husky::LOG_I << "# updated in this round: " << not_finished.get_value();
+        }
+        if (husky::Context::get_global_tid() == 0)
+            husky::LOG_I << "Run " << i << " done";
+    }
+
+    auto end = std::chrono::high_resolution_clock::now();
+
+    if (husky::Context::get_global_tid() == 0)
+        husky::LOG_I << "Elapsed time (CC - " << husky::Context::get_num_global_workers()
+                     << " workers): " << std::chrono::duration<double>(end - begin).count() / repeat << " sec(s)"
+                     << " " << std::chrono::duration<double>(end - t1).count() << " sec(s) ";
+
     std::string small_graph = husky::Context::get_param("print");
     if (small_graph == "1") {
         husky::list_execute(vertex_list,

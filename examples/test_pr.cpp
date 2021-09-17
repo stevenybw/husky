@@ -19,39 +19,51 @@
 #include "core/engine.hpp"
 #include "io/input/inputformat_store.hpp"
 
+namespace std {
+template <typename T1, typename T2>
+struct hash<std::pair<T1, T2>> {
+    std::size_t operator()(std::pair<T1, T2> const& p) const {
+        return std::hash<T1>()(p.first) ^ std::hash<T2>()(p.second);
+    }
+};
+}  // namespace std
+
+using vtx_t = int64_t;
+vtx_t parse_vertex(const std::string& str) { return std::stol(str.c_str()); }
+
 class Vertex {
    public:
-    using KeyT = int;
+    using KeyT = vtx_t;
 
     Vertex() : pr(0.15) {}
-    explicit Vertex(const KeyT& id) : vertexId(id), pr(0.15) {}
-    const KeyT& id() const { return vertexId; }
+    explicit Vertex(const KeyT& id) : vertex_id(id), pr(0.15) {}
+    const KeyT& id() const { return vertex_id; }
 
     // Serialization and deserialization
-    friend husky::BinStream& operator<<(husky::BinStream& stream, const Vertex& u) {
-        stream << u.vertexId << u.adj << u.pr;
+    friend husky::BinStream& operator<<(husky::BinStream& stream, const Vertex& v) {
+        stream << v.vertex_id << v.adj << v.pr;
         return stream;
     }
-    friend husky::BinStream& operator>>(husky::BinStream& stream, Vertex& u) {
-        stream >> u.vertexId >> u.adj >> u.pr;
+    friend husky::BinStream& operator>>(husky::BinStream& stream, Vertex& v) {
+        stream >> v.vertex_id >> v.adj >> v.pr;
         return stream;
     }
 
-    int vertexId;
-    std::vector<int> adj;
-    float pr;
+    vtx_t vertex_id;
+    std::vector<vtx_t> adj;
+    double pr;
 };
 
 class Edge {
    public:
-    using KeyT = std::pair<int, int>;
+    using KeyT = std::pair<vtx_t, vtx_t>;
 
     Edge() = default;
-    Edge(int src, int dst) : src(src), dst(dst) {}
+    Edge(vtx_t src, vtx_t dst) : src(src), dst(dst) {}
     explicit Edge(const KeyT& id) : Edge(id.first, id.second) {}
     KeyT id() const { return {src, dst}; }
 
-    int src, dst;
+    vtx_t src, dst;
 };
 
 void pagerank() {
@@ -70,7 +82,7 @@ void pagerank() {
         boost::char_separator<char> sep(" \t");
         boost::tokenizer<boost::char_separator<char>> tok(chunk, sep);
         auto it = tok.begin();
-        int src = stoi(*it++), dst = stoi(*it++);
+        vtx_t src = parse_vertex(*it++), dst = parse_vertex(*it++);
         edge_list.add_object(Edge(src, dst));
     };
     husky::load(infmt, parse_edge_list);
@@ -79,7 +91,7 @@ void pagerank() {
         husky::LOG_I << "read edge list finished";
 
     auto& vertex_list = husky::ObjListStore::create_objlist<Vertex>();
-    auto& reduce_neighbors_ch = husky::ChannelStore::create_push_channel<int>(edge_list, vertex_list);
+    auto& reduce_neighbors_ch = husky::ChannelStore::create_push_channel<vtx_t>(edge_list, vertex_list);
     husky::list_execute(edge_list, {}, {&reduce_neighbors_ch}, [&reduce_neighbors_ch](Edge& e) {
         reduce_neighbors_ch.push(-1, e.dst);
         reduce_neighbors_ch.push(e.dst, e.src);
@@ -87,7 +99,7 @@ void pagerank() {
     husky::list_execute(vertex_list, {&reduce_neighbors_ch}, {}, [&reduce_neighbors_ch](Vertex& v) {
         const auto& msgs = reduce_neighbors_ch.get(v);
         v.adj.reserve(v.adj.size() + msgs.size());
-        for (int dst : msgs)
+        for (vtx_t dst : msgs)
             if (dst > 0)
                 v.adj.push_back(dst);
     });
@@ -98,7 +110,7 @@ void pagerank() {
 
     // Iterative PageRank computation
     auto& prch =
-        husky::ChannelStore::create_push_combined_channel<float, husky::SumCombiner<float>>(vertex_list, vertex_list);
+        husky::ChannelStore::create_push_combined_channel<double, husky::SumCombiner<double>>(vertex_list, vertex_list);
     int numIters = stoi(husky::Context::get_param("iters"));
 
     auto begin = std::chrono::high_resolution_clock::now();
@@ -110,7 +122,7 @@ void pagerank() {
 
             if (u.adj.size() == 0)
                 return;
-            float sendPR = u.pr / u.adj.size();
+            double sendPR = u.pr / u.adj.size();
             for (auto& nb : u.adj) {
                 prch.push(sendPR, nb);
             }
